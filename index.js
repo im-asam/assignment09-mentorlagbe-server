@@ -323,6 +323,159 @@ app.patch(
   },
 );
 
+// ---------- Applications ----------
+
+// POST /applications — student only. Blocks duplicate applications.
+app.post("/applications", verifyToken, verifyStudent, async (req, res, next) => {
+  try {
+    const { tuitionId, studentPhone, preferredSchedule, studentNote } =
+      req.body || {};
+    if (!tuitionId || !studentPhone || !preferredSchedule) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+    if (!ObjectId.isValid(tuitionId)) {
+      return res.status(400).json({ error: "Invalid tuition id" });
+    }
+    const db = await getDb();
+    const tuition = await db
+      .collection("tuitions")
+      .findOne({ _id: new ObjectId(tuitionId) });
+    if (!tuition || tuition.approvalStatus !== "approved" || !tuition.isActive) {
+      return res
+        .status(400)
+        .json({ error: "Tuition is not available for applications" });
+    }
+    const coll = db.collection("applications");
+    const existing = await coll.findOne({
+      tuitionId,
+      studentEmail: req.userEmail,
+    });
+    if (existing) {
+      return res
+        .status(409)
+        .json({ error: "You have already applied for this tuition" });
+    }
+    const application = {
+      tuitionId,
+      tuitionTitle: tuition.title,
+      subject: tuition.subject,
+      monthlyFee: tuition.monthlyFee,
+      tutorEmail: tuition.tutorEmail,
+      studentName: req.user?.name || "",
+      studentEmail: req.userEmail,
+      studentPhone,
+      preferredSchedule,
+      studentNote: studentNote || "",
+      status: "pending",
+      appliedAt: new Date(),
+    };
+    const result = await coll.insertOne(application);
+    res.status(201).json({ _id: result.insertedId, ...application });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /applications/mine — student's own applications, newest first.
+app.get("/applications/mine", verifyToken, verifyStudent, async (req, res, next) => {
+  try {
+    const db = await getDb();
+    const applications = await db
+      .collection("applications")
+      .find({ studentEmail: req.userEmail })
+      .sort({ appliedAt: -1 })
+      .toArray();
+    res.json(applications);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /applications/:id — student only, owner only, only while pending.
+app.delete("/applications/:id", verifyToken, verifyStudent, async (req, res, next) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: "Invalid application id" });
+    }
+    const db = await getDb();
+    const coll = db.collection("applications");
+    const application = await coll.findOne({ _id: new ObjectId(req.params.id) });
+    if (!application) {
+      return res.status(404).json({ error: "Application not found" });
+    }
+    if (application.studentEmail !== req.userEmail) {
+      return res
+        .status(403)
+        .json({ error: "Forbidden: this application is not yours" });
+    }
+    if (application.status !== "pending") {
+      return res
+        .status(400)
+        .json({ error: "Only pending applications can be cancelled" });
+    }
+    await coll.deleteOne({ _id: application._id });
+    res.json({ deleted: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /applications/tutor — applications on the tutor's own tuitions.
+app.get("/applications/tutor", verifyToken, verifyTutor, async (req, res, next) => {
+  try {
+    const db = await getDb();
+    const applications = await db
+      .collection("applications")
+      .find({ tutorEmail: req.userEmail })
+      .sort({ appliedAt: -1 })
+      .toArray();
+    res.json(applications);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /applications/:id/status — tutor only, for their own tuitions.
+app.patch(
+  "/applications/:id/status",
+  verifyToken,
+  verifyTutor,
+  async (req, res, next) => {
+    try {
+      if (!ObjectId.isValid(req.params.id)) {
+        return res.status(400).json({ error: "Invalid application id" });
+      }
+      const { status } = req.body || {};
+      if (!["accepted", "rejected"].includes(status)) {
+        return res
+          .status(400)
+          .json({ error: 'status must be "accepted" or "rejected"' });
+      }
+      const db = await getDb();
+      const coll = db.collection("applications");
+      const application = await coll.findOne({
+        _id: new ObjectId(req.params.id),
+      });
+      if (!application) {
+        return res.status(404).json({ error: "Application not found" });
+      }
+      if (application.tutorEmail !== req.userEmail) {
+        return res.status(403).json({
+          error: "Forbidden: this application is not for your tuition",
+        });
+      }
+      await coll.updateOne(
+        { _id: application._id },
+        { $set: { status } },
+      );
+      const updated = await coll.findOne({ _id: application._id });
+      res.json(updated);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 // 404 for unknown routes.
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
