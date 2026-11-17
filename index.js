@@ -40,7 +40,9 @@ app.get("/tuitions", async (req, res, next) => {
     const { search, subject, classLevel, mode } = req.query;
     const query = { approvalStatus: "approved", isActive: true };
     if (search) {
-      const regex = new RegExp(search, "i");
+      // Escape regex metacharacters so a search like "(" cannot throw.
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(escaped, "i");
       query.$or = [{ title: regex }, { subject: regex }];
     }
     if (subject) query.subject = subject;
@@ -579,10 +581,15 @@ app.patch(
       }
       const db = await getDb();
       const id = req.params.id;
-      const query = ObjectId.isValid(id)
-        ? { _id: new ObjectId(id) }
-        : { _id: id };
-      const { collection, doc } = await findUserCollection(db, query);
+      // Try ObjectId first, then the raw string id (BetterAuth uses string ids).
+      let found = await findUserCollection(
+        db,
+        ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id },
+      );
+      if (!found.doc && ObjectId.isValid(id)) {
+        found = await findUserCollection(db, { _id: id });
+      }
+      const { collection, doc } = found;
       if (!doc) {
         return res.status(404).json({ error: "User not found" });
       }
