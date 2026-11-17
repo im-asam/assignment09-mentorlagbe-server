@@ -179,7 +179,8 @@ async function phase2(db) {
     try {
       res = await fetch(`${CLIENT_URL}/api/auth/sign-up/email`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        // BetterAuth rejects cross-site sign-ups without a matching Origin.
+        headers: { "Content-Type": "application/json", Origin: CLIENT_URL },
         body: JSON.stringify({
           name: account.name,
           email: account.email,
