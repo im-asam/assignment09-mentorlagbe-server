@@ -52,7 +52,7 @@ const TUTORS = [
 // [tutorIndex, title, subject, classLevel, mode, location, monthlyFee, daysPerWeek, imageId, description]
 const TUITION_ROWS = [
   [0, "SSC Mathematics — Complete Preparation", "Math", "SSC", "Offline", "Chattogram, GEC Circle", 4000, 3, "photo-1509228468518-180dd4864904", "Full SSC math syllabus with chapter-wise sheets, weekly model tests and board-question practice. Small batch of 8 students so every student gets individual attention."],
-  [0, "HSC Higher Math 1st & 2nd Paper", "Higher Math", "HSC", "Online", "Online (Zoom)", 5000, 4, "photo-1635372722656-8e7b8e4e0e4d", "HSC Higher Math both papers with CQ + MCQ drills, admission-style problem solving and recorded classes for revision."],
+  [0, "HSC Higher Math 1st & 2nd Paper", "Higher Math", "HSC", "Online", "Online (Zoom)", 5000, 4, "photo-1509228468518-180dd4864904", "HSC Higher Math both papers with CQ + MCQ drills, admission-style problem solving and recorded classes for revision."],
   [1, "Physics for Class 9-10 (SSC)", "Physics", "Class 9", "Offline", "Dhaka, Mirpur 10", 3500, 3, "photo-1507413245164-6160d8298b31", "Concept-first physics with everyday examples, numerical practice and monthly progress reports for parents."],
   [1, "HSC Chemistry — Organic Made Easy", "Chemistry", "HSC", "Online", "Online (Google Meet)", 4500, 3, "photo-1532094349884-543bc11b234d", "Organic and inorganic chemistry with reaction maps, shortcut techniques and full MCQ bank for board + admission."],
   [1, "SSC Biology with Diagrams & Model Tests", "Biology", "SSC", "Offline", "Chattogram, Agrabad", 3000, 2, "photo-1532187863486-abf9dbad1b69", "Biology made visual — labelled diagrams, mnemonics for terminology and regular chapter tests."],
@@ -61,7 +61,7 @@ const TUITION_ROWS = [
   [3, "IELTS Preparation — Target Band 7+", "IELTS", "IELTS Prep", "Online", "Online (Zoom)", 8000, 5, "photo-1543269865-cbf427effbad", "Complete IELTS prep: speaking mock tests, writing task feedback, reading strategies and full mock exams every week."],
   [0, "Accounting Principles — HSC Commerce", "Accounting", "HSC", "Offline", "Dhaka, Dhanmondi", 4000, 3, "photo-1554224155-6726b3ff858f", "HSC accounting 1st & 2nd paper with journal-to-final-accounts practice and board question solving."],
   [2, "ICT for SSC — Practical + Theory", "ICT", "SSC", "Online", "Online (Google Meet)", 2000, 2, "photo-1516321318423-f06f85e504b3", "SSC ICT theory plus hands-on practice — number systems, HTML basics and spreadsheet skills, all exam-focused."],
-  [3, "Bangla Language & Literature — Class 9-10", "Bangla", "Class 10", "Offline", "Chattogram, Halishahar", 2800, 2, "photo-1524995997946-a1c2e315a42f", "Bangla 1st & 2nd paper with grammar drills, creative writing practice and board-question analysis."],
+  [3, "Bangla Language & Literature — Class 9-10", "Bangla", "Class 10", "Offline", "Chattogram, Halishahar", 2800, 2, "photo-1456513080510-7bf3a84b82f8", "Bangla 1st & 2nd paper with grammar drills, creative writing practice and board-question analysis."],
   [0, "HSC Economics — Micro & Macro", "Economics", "HSC", "Online", "Online (Zoom)", 12000, 3, "photo-1611974789855-9c2a0a7236a3", "1-on-1 HSC Economics mentorship with graph-based explanations, current-affairs links and admission prep for business faculties."],
 ];
 

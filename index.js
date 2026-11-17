@@ -363,6 +363,7 @@ app.post("/applications", verifyToken, verifyStudent, async (req, res, next) => 
       subject: tuition.subject,
       monthlyFee: tuition.monthlyFee,
       tutorEmail: tuition.tutorEmail,
+      tutorName: tuition.tutorName || "",
       studentName: req.user?.name || "",
       studentEmail: req.userEmail,
       studentPhone,
@@ -387,6 +388,30 @@ app.get("/applications/mine", verifyToken, verifyStudent, async (req, res, next)
       .find({ studentEmail: req.userEmail })
       .sort({ appliedAt: -1 })
       .toArray();
+    // Backfill tutorName for applications created before it was stored.
+    const missing = applications.filter((a) => !a.tutorName);
+    if (missing.length) {
+      const tuitionIds = [
+        ...new Set(missing.map((a) => a.tuitionId).filter(ObjectId.isValid)),
+      ].map((id) => new ObjectId(id));
+      const tuitions = await db
+        .collection("tuitions")
+        .find({ _id: { $in: tuitionIds } })
+        .project({ tutorName: 1, tutorEmail: 1 })
+        .toArray();
+      const byId = new Map(tuitions.map((t) => [t._id.toString(), t]));
+      const emails = [...new Set(missing.map((a) => a.tutorEmail).filter(Boolean))];
+      const users = await db
+        .collection("users")
+        .find({ email: { $in: emails } })
+        .project({ email: 1, name: 1 })
+        .toArray();
+      const nameByEmail = new Map(users.map((u) => [u.email, u.name]));
+      for (const a of missing) {
+        const t = byId.get(a.tuitionId);
+        a.tutorName = t?.tutorName || nameByEmail.get(a.tutorEmail) || "";
+      }
+    }
     res.json(applications);
   } catch (err) {
     next(err);
