@@ -476,6 +476,186 @@ app.patch(
   },
 );
 
+// ---------- Users ----------
+
+// The users collection is BetterAuth's user model (modelName "users");
+// fall back to the default "user" collection if a doc is only there.
+async function findUserCollection(db, query) {
+  for (const name of ["users", "user"]) {
+    const doc = await db.collection(name).findOne(query);
+    if (doc) return { collection: db.collection(name), doc };
+  }
+  return { collection: db.collection("users"), doc: null };
+}
+
+// GET /users/me — logged-in user's profile.
+app.get("/users/me", verifyToken, async (req, res, next) => {
+  try {
+    const db = await getDb();
+    const { doc } = await findUserCollection(db, { email: req.userEmail });
+    if (!doc) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    res.json({
+      name: doc.name,
+      email: doc.email,
+      image: doc.image || null,
+      role: doc.role || "student",
+      phone: doc.phone || "",
+      bio: doc.bio || "",
+      plan: doc.plan || "free",
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /users/me — update own profile (whitelisted fields only).
+app.patch("/users/me", verifyToken, async (req, res, next) => {
+  try {
+    const allowed = ["name", "phone", "bio", "image"];
+    const updates = {};
+    for (const key of allowed) {
+      if (req.body && req.body[key] !== undefined) {
+        updates[key] = req.body[key];
+      }
+    }
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: "No valid fields to update" });
+    }
+    const db = await getDb();
+    const { collection, doc } = await findUserCollection(db, {
+      email: req.userEmail,
+    });
+    if (!doc) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    await collection.updateOne({ _id: doc._id }, { $set: updates });
+    const updated = await collection.findOne({ _id: doc._id });
+    res.json({
+      name: updated.name,
+      email: updated.email,
+      image: updated.image || null,
+      role: updated.role || "student",
+      phone: updated.phone || "",
+      bio: updated.bio || "",
+      plan: updated.plan || "free",
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------- Admin: users, stats, transactions ----------
+
+// GET /admin/users — admin only. All users.
+app.get("/admin/users", verifyToken, verifyAdmin, async (req, res, next) => {
+  try {
+    const db = await getDb();
+    const users = await db
+      .collection("users")
+      .find({})
+      .project({ name: 1, email: 1, image: 1, role: 1, phone: 1, bio: 1, plan: 1, createdAt: 1 })
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.json(users);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /admin/users/:id/role — admin only. Change a user's role.
+app.patch(
+  "/admin/users/:id/role",
+  verifyToken,
+  verifyAdmin,
+  async (req, res, next) => {
+    try {
+      const { role } = req.body || {};
+      if (!["student", "tutor", "admin"].includes(role)) {
+        return res
+          .status(400)
+          .json({ error: 'role must be "student", "tutor" or "admin"' });
+      }
+      const db = await getDb();
+      const id = req.params.id;
+      const query = ObjectId.isValid(id)
+        ? { _id: new ObjectId(id) }
+        : { _id: id };
+      const { collection, doc } = await findUserCollection(db, query);
+      if (!doc) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      await collection.updateOne({ _id: doc._id }, { $set: { role } });
+      const updated = await collection.findOne({ _id: doc._id });
+      res.json({
+        _id: updated._id,
+        name: updated.name,
+        email: updated.email,
+        role: updated.role,
+        plan: updated.plan || "free",
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// GET /admin/stats — admin only. Platform statistics.
+app.get("/admin/stats", verifyToken, verifyAdmin, async (req, res, next) => {
+  try {
+    const db = await getDb();
+    const users = db.collection("users");
+    const tuitions = db.collection("tuitions");
+    const payments = db.collection("payments");
+    const [
+      totalUsers,
+      totalTutors,
+      totalStudents,
+      pendingTuitions,
+      approvedTuitions,
+      totalPayments,
+      revenueAgg,
+    ] = await Promise.all([
+      users.countDocuments({}),
+      users.countDocuments({ role: "tutor" }),
+      users.countDocuments({ role: "student" }),
+      tuitions.countDocuments({ approvalStatus: "pending" }),
+      tuitions.countDocuments({ approvalStatus: "approved" }),
+      payments.countDocuments({}),
+      payments
+        .aggregate([{ $group: { _id: null, total: { $sum: "$amount" } } }])
+        .toArray(),
+    ]);
+    res.json({
+      totalUsers,
+      totalTutors,
+      totalStudents,
+      pendingTuitions,
+      approvedTuitions,
+      totalRevenue: revenueAgg[0]?.total || 0,
+      totalPayments,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /admin/transactions — admin only. All payments, newest first.
+app.get("/admin/transactions", verifyToken, verifyAdmin, async (req, res, next) => {
+  try {
+    const db = await getDb();
+    const payments = await db
+      .collection("payments")
+      .find({})
+      .sort({ paidAt: -1 })
+      .toArray();
+    res.json(payments);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // 404 for unknown routes.
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
