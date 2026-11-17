@@ -69,6 +69,22 @@ app.get("/tuitions", async (req, res, next) => {
   }
 });
 
+// GET /tuitions/mine — tutor's own tuitions. Defined BEFORE /tuitions/:id
+// so "mine" is not treated as an id (Express matches in registration order).
+app.get("/tuitions/mine", verifyToken, verifyTutor, async (req, res, next) => {
+  try {
+    const db = await getDb();
+    const tuitions = await db
+      .collection("tuitions")
+      .find({ tutorEmail: req.userEmail })
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.json(tuitions);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /tuitions/:id — public. Returns the tuition by id (any status) or 404.
 app.get("/tuitions/:id", async (req, res, next) => {
   try {
@@ -89,23 +105,6 @@ app.get("/tuitions/:id", async (req, res, next) => {
 });
 
 // ---------- Tuitions (tutor) ----------
-
-// GET /tuitions/mine — tutor's own tuitions. Defined BEFORE /tuitions/:id
-// so "mine" is not treated as an id. (Placed after it in source order would
-// break routing; Express matches in registration order.)
-app.get("/tuitions/mine", verifyToken, verifyTutor, async (req, res, next) => {
-  try {
-    const db = await getDb();
-    const tuitions = await db
-      .collection("tuitions")
-      .find({ tutorEmail: req.userEmail })
-      .sort({ createdAt: -1 })
-      .toArray();
-    res.json(tuitions);
-  } catch (err) {
-    next(err);
-  }
-});
 
 // POST /tuitions — tutor only. Free-plan tutors max 2 tuitions; pro unlimited.
 app.post("/tuitions", verifyToken, verifyTutor, async (req, res, next) => {
@@ -273,6 +272,56 @@ app.delete("/tuitions/:id", verifyToken, verifyTutor, async (req, res, next) => 
     next(err);
   }
 });
+
+// ---------- Admin: tuitions ----------
+
+// GET /admin/tuitions — admin only. All tuitions, newest first.
+app.get("/admin/tuitions", verifyToken, verifyAdmin, async (req, res, next) => {
+  try {
+    const db = await getDb();
+    const tuitions = await db
+      .collection("tuitions")
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.json(tuitions);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /admin/tuitions/:id/status — admin only. Approve or reject a tuition.
+app.patch(
+  "/admin/tuitions/:id/status",
+  verifyToken,
+  verifyAdmin,
+  async (req, res, next) => {
+    try {
+      if (!ObjectId.isValid(req.params.id)) {
+        return res.status(400).json({ error: "Invalid tuition id" });
+      }
+      const { approvalStatus } = req.body || {};
+      if (!["approved", "rejected"].includes(approvalStatus)) {
+        return res
+          .status(400)
+          .json({ error: 'approvalStatus must be "approved" or "rejected"' });
+      }
+      const db = await getDb();
+      const coll = db.collection("tuitions");
+      const result = await coll.updateOne(
+        { _id: new ObjectId(req.params.id) },
+        { $set: { approvalStatus } },
+      );
+      if (result.matchedCount === 0) {
+        return res.status(404).json({ error: "Tuition not found" });
+      }
+      const updated = await coll.findOne({ _id: new ObjectId(req.params.id) });
+      res.json(updated);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 // 404 for unknown routes.
 app.use((req, res) => {
