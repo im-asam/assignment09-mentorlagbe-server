@@ -656,6 +656,166 @@ app.get("/admin/transactions", verifyToken, verifyAdmin, async (req, res, next) 
   }
 });
 
+// ---------- Payments (Stripe, TEST mode) ----------
+
+// Stripe is optional at deploy time: if STRIPE_SECRET_KEY is unset, the
+// checkout endpoints return a clean 503 instead of crashing.
+let stripe = null;
+if (process.env.STRIPE_SECRET_KEY) {
+  stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+}
+
+const PLANS = {
+  "tutor-pro": { name: "Tutor Pro", amountCents: 1500 },
+  "student-pro": { name: "Student Pro", amountCents: 1000 },
+};
+
+function getClientUrl() {
+  return (
+    process.env.CLIENT_URL ||
+    "https://assignment09-mentorlagbe-client.vercel.app"
+  ).replace(/\/$/, "");
+}
+
+// POST /payments/create-checkout-session — start a Pro plan checkout.
+app.post(
+  "/payments/create-checkout-session",
+  verifyToken,
+  async (req, res, next) => {
+    try {
+      if (!stripe) {
+        return res.status(503).json({ error: "Stripe is not configured yet" });
+      }
+      const { plan } = req.body || {};
+      const planDef = PLANS[plan];
+      if (!planDef) {
+        return res.status(400).json({
+          error: 'plan must be "tutor-pro" or "student-pro"',
+        });
+      }
+      const clientUrl = getClientUrl();
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        currency: "usd",
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              unit_amount: planDef.amountCents,
+              product_data: { name: `MentorLagbe ${planDef.name} Plan` },
+            },
+            quantity: 1,
+          },
+        ],
+        metadata: {
+          userEmail: req.userEmail,
+          userName: req.user?.name || "",
+          userRole: req.user?.role || "",
+          planName: planDef.name,
+        },
+        success_url: `${clientUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${clientUrl}/payment/cancel`,
+      });
+      res.json({ url: session.url });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// Records a paid checkout session (idempotent by stripeSessionId) and
+// upgrades the user's plan to "pro". Shared by verify-session + webhook.
+async function recordPaidSession(session) {
+  const db = await getDb();
+  const meta = session.metadata || {};
+  const payment = {
+    userEmail: meta.userEmail || session.customer_details?.email || "",
+    userName: meta.userName || "",
+    userRole: meta.userRole || "",
+    planName: meta.planName || "",
+    amount: (session.amount_total || 0) / 100,
+    currency: session.currency || "usd",
+    transactionId: session.payment_intent || "",
+    stripeSessionId: session.id,
+    paymentStatus: "paid",
+    paidAt: new Date(),
+  };
+  await db.collection("payments").updateOne(
+    { stripeSessionId: session.id },
+    { $setOnInsert: payment },
+    { upsert: true },
+  );
+  if (payment.userEmail) {
+    // Upgrade the plan in whichever user collection holds the doc.
+    for (const name of ["users", "user"]) {
+      const result = await db
+        .collection(name)
+        .updateOne({ email: payment.userEmail }, { $set: { plan: "pro" } });
+      if (result.matchedCount > 0) break;
+    }
+  }
+  return db.collection("payments").findOne({ stripeSessionId: session.id });
+}
+
+// POST /payments/verify-session — confirm a checkout after redirect.
+app.post("/payments/verify-session", verifyToken, async (req, res, next) => {
+  try {
+    if (!stripe) {
+      return res.status(503).json({ error: "Stripe is not configured yet" });
+    }
+    const { sessionId } = req.body || {};
+    if (!sessionId) {
+      return res.status(400).json({ error: "sessionId is required" });
+    }
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    if (session.payment_status !== "paid") {
+      return res.status(400).json({ error: "Payment is not completed yet" });
+    }
+    const payment = await recordPaidSession(session);
+    res.json(payment);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /webhooks/stripe — Stripe webhook (raw body; registered before
+// express.json() at the top of this file). Always responds 200 quickly.
+app.post("/webhooks/stripe", async (req, res) => {
+  let event;
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (stripe && webhookSecret) {
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        req.headers["stripe-signature"],
+        webhookSecret,
+      );
+    } catch (err) {
+      console.error("Stripe webhook signature verification failed:", err.message);
+      return res.status(400).json({ error: "Invalid webhook signature" });
+    }
+  } else {
+    if (!webhookSecret) {
+      console.warn("STRIPE_WEBHOOK_SECRET is not set; skipping signature verification (test mode)");
+    }
+    try {
+      event = JSON.parse(req.body.toString("utf8"));
+    } catch (err) {
+      return res.status(400).json({ error: "Invalid webhook payload" });
+    }
+  }
+
+  try {
+    if (event.type === "checkout.session.completed") {
+      await recordPaidSession(event.data.object);
+    }
+  } catch (err) {
+    console.error("Stripe webhook handler failed:", err.message);
+    // Still return 200 so Stripe does not retry a DB-side failure forever.
+  }
+  res.json({ received: true });
+});
+
 // 404 for unknown routes.
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
