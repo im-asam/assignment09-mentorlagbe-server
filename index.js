@@ -729,6 +729,8 @@ app.post(
       const session = await stripe.checkout.sessions.create({
         mode: "payment",
         currency: "usd",
+        // Shows the "Add promotion code" field on the Stripe Checkout page.
+        allow_promotion_codes: true,
         line_items: [
           {
             price_data: {
