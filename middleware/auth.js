@@ -23,7 +23,9 @@ let jwksCache = null; // { keys: [...], fetchedAt: number }
 async function fetchJwks() {
   let res;
   try {
-    res = await fetch(JWKS_URL, { signal: AbortSignal.timeout(8000) });
+    // 25s: on a cold start the client's JWKS route itself can take >8s
+    // to answer; timing out here turns a slow first call into a 401.
+    res = await fetch(JWKS_URL, { signal: AbortSignal.timeout(25000) });
   } catch (err) {
     console.error("JWKS fetch error:", err.message);
     throw new Error(`JWKS fetch failed: ${err.message}`);
