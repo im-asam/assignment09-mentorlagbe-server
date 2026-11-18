@@ -802,7 +802,10 @@ app.post("/payments/verify-session", verifyToken, async (req, res, next) => {
       return res.status(400).json({ error: "sessionId is required" });
     }
     const session = await stripe.checkout.sessions.retrieve(sessionId);
-    if (session.payment_status !== "paid") {
+    // Per the instructor's Stripe guide (§4): verify BOTH status and
+    // payment_status server-side before recording anything — never trust
+    // the redirect alone.
+    if (session.status !== "complete" || session.payment_status !== "paid") {
       return res.status(400).json({ error: "Payment is not completed yet" });
     }
     const payment = await recordPaidSession(session);
@@ -815,28 +818,25 @@ app.post("/payments/verify-session", verifyToken, async (req, res, next) => {
 // POST /webhooks/stripe — Stripe webhook (raw body; registered before
 // express.json() at the top of this file). Always responds 200 quickly.
 app.post("/webhooks/stripe", async (req, res) => {
+  // Fail closed: without Stripe configured AND a webhook secret, no event is
+  // ever processed unsigned (instructor's Stripe guide, rule 5 — "never
+  // process a webhook without constructEvent").
+  if (!stripe || !process.env.STRIPE_WEBHOOK_SECRET) {
+    console.error(
+      "Stripe webhook is not configured (missing secret key or webhook secret)",
+    );
+    return res.status(500).json({ error: "Webhook is not configured" });
+  }
   let event;
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (stripe && webhookSecret) {
-    try {
-      event = stripe.webhooks.constructEvent(
-        req.body,
-        req.headers["stripe-signature"],
-        webhookSecret,
-      );
-    } catch (err) {
-      console.error("Stripe webhook signature verification failed:", err.message);
-      return res.status(400).json({ error: "Invalid webhook signature" });
-    }
-  } else {
-    if (!webhookSecret) {
-      console.warn("STRIPE_WEBHOOK_SECRET is not set; skipping signature verification (test mode)");
-    }
-    try {
-      event = JSON.parse(req.body.toString("utf8"));
-    } catch (err) {
-      return res.status(400).json({ error: "Invalid webhook payload" });
-    }
+  try {
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      req.headers["stripe-signature"],
+      process.env.STRIPE_WEBHOOK_SECRET,
+    );
+  } catch (err) {
+    console.error("Stripe webhook signature verification failed:", err.message);
+    return res.status(400).json({ error: "Invalid webhook signature" });
   }
 
   try {
